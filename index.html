@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FixDesk · Issue tracker</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f3f5f8; color: #18273a; font: 1rem/1.5 system-ui, sans-serif; }
+    header { background: #15283e; color: white; padding: 3rem 1.25rem; }
+    header div, main { max-width: 48rem; margin: auto; }
+    h1 { font-size: clamp(2.5rem, 8vw, 4rem); line-height: 1; margin: .5rem 0; }
+    h2, p { margin-top: 0; }
+    header p { margin-bottom: 0; color: #c7d8e8; }
+    main { padding: 1.25rem; }
+    section { padding: 1.25rem; margin: 0 0 1rem; background: white; border: 1px solid #dce3ed; border-radius: 1rem; }
+    label { display: block; margin-bottom: .5rem; }
+    form div, li { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+    input, button { font: inherit; padding: .55rem .75rem; border-radius: .5rem; }
+    input { flex: 1 1 15rem; min-width: 0; border: 1px solid #738497; }
+    button { background: #075c55; color: white; border: 1px solid transparent; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    :focus-visible { outline: 3px solid #387dd1; outline-offset: 3px; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { border-top: 1px solid #dce3ed; padding: .75rem 0; }
+    li strong { flex: 1 1 12rem; overflow-wrap: anywhere; }
+    .badge { font-size: .875rem; padding: .25rem .5rem; border-radius: 1rem; background: #ffefce; color: #654100; }
+    .done { background: #def1e9; color: #14583c; }
+    #error { color: #a22c28; margin: .75rem 0 0; }
+    #error:empty { margin: 0; }
+  </style>
+</head>
+<body>
+  <header><div><p>MAINTENANCE DESK</p><h1>FixDesk</h1><p>Report an issue and track it through resolution.</p></div></header>
+  <main>
+    <section aria-labelledby="report">
+      <h2 id="report">Report an issue</h2>
+      <form>
+        <label for="title">What needs fixing?</label>
+        <div><input id="title" maxlength="120" required placeholder="e.g. Projector won't start"><button>Add issue</button></div>
+      </form>
+      <p id="error" role="alert"></p>
+    </section>
+    <section aria-labelledby="queue">
+      <h2 id="queue">Issue queue</h2>
+      <p id="summary" role="status">Loading issues…</p>
+      <ul></ul>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector('form');
+    const input = document.querySelector('#title');
+    const submit = form.querySelector('button');
+    const list = document.querySelector('ul');
+    const summary = document.querySelector('#summary');
+    const error = document.querySelector('#error');
+
+    async function request(path, options) {
+      const response = await fetch(path, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      return data;
+    }
+
+    async function refresh() {
+      const issues = await request('/api/issues');
+      const open = issues.filter(issue => !issue.resolved).length;
+      summary.textContent = issues.length ? `${open} open · ${issues.length - open} resolved` : 'No issues reported yet.';
+      list.replaceChildren(...issues.map(issue => {
+        const item = document.createElement('li');
+        const title = document.createElement('strong');
+        title.textContent = `#${issue.id} ${issue.title}`;
+        const badge = document.createElement('span');
+        badge.className = issue.resolved ? 'badge done' : 'badge';
+        badge.textContent = issue.resolved ? 'Resolved' : 'Open';
+        item.append(title, badge);
+        if (!issue.resolved) {
+          const button = document.createElement('button');
+          button.textContent = 'Resolve';
+          button.setAttribute('aria-label', `Resolve issue #${issue.id}`);
+          button.addEventListener('click', async () => {
+            button.disabled = true;
+            error.textContent = '';
+            try {
+              await request(`/api/issues/${issue.id}/resolve`, { method: 'PATCH' });
+              await refresh();
+            } catch (failure) {
+              error.textContent = failure.message;
+            } finally {
+              button.disabled = false;
+            }
+          });
+          item.append(button);
+        }
+        return item;
+      }));
+    }
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      submit.disabled = true;
+      error.textContent = '';
+      try {
+        await request('/api/issues', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: input.value })
+        });
+        form.reset();
+        await refresh();
+      } catch (failure) {
+        error.textContent = failure.message;
+      } finally {
+        submit.disabled = false;
+        input.focus();
+      }
+    });
+    refresh().catch(() => { summary.textContent = 'Could not load issues. Reload to try again.'; });
+  </script>
+</body>
+</html>
